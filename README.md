@@ -1,8 +1,4 @@
-# JWST_nirspec_redux_pipeline_v2
-Converting our LEGGOS scripts from v1.20 of the JWST pipeline to v2 and now v3
+# JWST_LEGGOS_nirspec_redux_pipeline
+Converted our LEGGOS scripts from v1.20 of the JWST pipeline to v2 and now v3
 
-TO do list:
-- 1) DONE Get v1.20 of pipeline working w the new C4 nispec spectra
-- 2) DONE Get v2.0 working w clean_flickr_noise 
-- 3) DONE, but is it any good? Get v2.0 working w clean_flickr_noise + wiggle  fix 
-- 4) Ditto, plus wcs correction from stage 3, and artifact correction
+v3/ has the pipeline working on leggos data with v3 of the pipeline.  The adaptive trace model is now being used; still need to determine whether it fixes the wiggles adequately.
