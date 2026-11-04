@@ -1,0 +1,129 @@
+Created using GPT-5.6-Sol.
+
+Update the LEGGOS JWST NIRSpec IFU pipeline scripts in the current directory.
+Preserve the original pipeline script and work in a new version named
+run_pipeline_v1p21_IFS_v3.py. Keep the code plain and easy for a scientist to
+read. Avoid unrelated refactoring.
+
+At startup, obtain the installed pipeline version from jwst.__version__. Parse
+it robustly with packaging.version.Version and stop with a clear error for a
+malformed or unexpected version. Put the complete Detector1, Spec2, and Spec3
+nested parameter dictionaries together near the top of the script so a human
+can easily compare releases.
+
+For JWST pipeline 1.20.2, use:
+
+    Detector1:
+      save_results = True
+      jump.maximum_cores = 'half'
+      jump.expand_large_events = True
+      ramp_fit.maximum_cores = 'half'
+      clean_flicker_noise.skip = False
+      clean_flicker_noise.fit_method = 'fft'
+      clean_flicker_noise.mask_science_regions = True
+
+    Spec2:
+      save_results = True
+      srctype.source_type = 'EXTENDED'
+      cube_build.skip = True
+      extract_1d.skip = True
+      pixel_replace.skip = False
+      pixel_replace.algorithm = 'mingrad'
+
+    Spec3:
+      save_results = True
+      outlier_detection.skip = False
+      outlier_detection.ifu_second_check = True
+      cube_build.coord_system = 'skyalign'
+      extract_1d.skip = True
+
+For any JWST pipeline 2.x release, use the settings introduced for 2.0.1:
+
+    Detector1:
+      save_results = True
+      jump.expand_large_events = True
+      picture_frame.skip = False
+      clean_flicker_noise.skip = False
+      clean_flicker_noise.autoparam = False
+      clean_flicker_noise.fit_method = 'fft'
+      clean_flicker_noise.background_method = None
+      clean_flicker_noise.n_sigma = 3
+      clean_flicker_noise.mask_science_regions = True
+      clean_flicker_noise.save_noise = False
+
+    Spec2:
+      save_results = True
+      srctype.source_type = 'EXTENDED'
+      cube_build.skip = True
+      extract_1d.skip = True
+      pixel_replace.skip = False
+      pixel_replace.algorithm = 'mingrad'
+
+    Spec3:
+      save_results = True
+      outlier_detection.skip = False
+      outlier_detection.ifu_second_check = True
+      cube_build.coord_system = 'skyalign'
+      extract_1d.skip = True
+      adaptive_trace_model.skip = False
+
+Do not set adaptive_trace_model.maximum_core in pipeline 2.x: that parameter
+does not exist in JWST pipeline 2.0.1. Add an explicit 3.x branch, seed all
+three stage dictionaries with copies of the 2.x dictionaries, set every Spec2
+srctype.source_type to 'EXTENDED', set cube_build.linear_wave=False for v3,
+and enable v3 adaptive-trace multiprocessing with maximum_cores='half'.
+
+Set CRDS_PATH and CRDS_SERVER_URL, but remove any forced CRDS_CONTEXT and clear
+an inherited CRDS_CONTEXT so modern CRDS selects the build context associated
+with the installed JWST calibration-software version. After each pipeline run,
+inspect returned cal_step metadata and raise a clear RuntimeError listing any
+steps whose status is FAILED.
+
+Before creating either multiprocessing pool, run a cached parent-process CRDS
+preflight. Resolve the version-matched build context once, download its entire
+mapping closure with crds.client.api.dump_mappings(), and export that resolved
+literal context to spawned workers. Pool workers must retain the preflighted
+context rather than clearing it. This prevents simultaneous first-use mapping
+downloads from corrupting the shared CRDS cache. Before each pool, also run
+CRDS bestrefs for that pool's exact FITS inputs with mapping and reference
+synchronization enabled. Wait for the command to complete so workers cannot
+open large reference FITS files while they are still downloading. Print a
+prominent, immediately flushed message explaining that missing NIRSpec
+references may be several GB, apparent inactivity is expected, and workers
+will start after synchronization completes.
+
+Apply nested dictionaries with a small recursive helper. Copy each base
+dictionary before adding exposure-, target-, resolution-, or output-specific
+values. Suppress only the overflow/invalid-value RuntimeWarnings produced by
+matrix multiplication in jwst.clean_flicker_noise.lib; leave other warnings
+visible.
+
+Add multiprocessing for Detector1 and Spec2. Give run_pipeline() a
+cores2use=4 argument. Implement top-level, pickle-safe run_jwst_det1 and
+run_jwst_spec2 worker functions and execute prepared (input file, parameter
+dictionary) tasks with multiprocessing.pool.Pool.starmap. Finish the complete
+Detector1 pool before discovering rate files and starting the Spec2 pool.
+Keep Spec3 sequential. With more than one outer worker, set any Detector1
+jump/ramp_fit maximum_cores entries to '1' to prevent nested multiprocessing.
+Support cores2use=1 as a sequential path, reject invalid core counts, and let
+worker exceptions propagate visibly.
+
+Preserve the existing special cases: leak-cal files, NRS2 filtering,
+clean_flicker_noise skipping, association processing, target cube geometry,
+WOPR-only processing, prism processing, and background subtraction. If the
+legacy SGAS1110 WOPR glob jw03843005*cal.fits finds no files, print a clear
+message and skip that optional block instead of creating an invalid empty
+association.
+
+Replace the target-specific calmax if-chain with a compact target-to-threshold
+dictionary. Remove calmax_blue and calmax_red because they are unused.
+
+Update run_all_IFS_targets.py to import run_pipeline_v1p21_IFS_v3, define a
+clear CORES_TO_USE = 4 constant, and pass it as cores2use. Retain the __main__
+guard required for multiprocessing. Continue discovering every target folder
+containing *_uncal.fits, run with background subtraction disabled and cube
+resolution 0.1, and report total elapsed time as HH:MM:SS at completion.
+
+Finally, compile both Python files. Validate the parameter dictionaries in the
+installed 1.20.2 and 2.0.1 environments and run a small multiprocessing smoke
+test without processing the science dataset.

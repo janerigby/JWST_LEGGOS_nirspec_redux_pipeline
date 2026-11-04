@@ -1,0 +1,159 @@
+Continue debugging and validating Brian Welch's JWST NIRSpec IFU reduction
+pipeline in this directory.
+
+Use this Python environment:
+
+    /Users/jrrigby1/miniforge3/envs/JWSTDP-1.20.2-1-py312-macos-arm64/bin/python
+
+The main pipeline script is:
+
+    run_pipeline_v1p21_IFS.py
+
+The input, output, calibration-cache, and background directories are configured
+near the beginning of that file. The current raw-data root is:
+
+    /Users/jrrigby1/SCIENCE/JWST_Data/LEGGOS/Raw_data/PID04125/
+
+Work already completed
+======================
+
+The script was debugged using real SGAS1429 data. Preserve the existing fixes:
+
+1. Detector1 configuration and det1.run(exposure) were moved inside the
+   exposure loop. Previously only the last exposure could run, and some grating
+   branches did not run at all.
+
+2. The Detector1 clean_flicker_noise logic was corrected. Medium-grating NRS2
+   files skip clean_flicker_noise; other applicable files configure and run it.
+
+3. Shell-based mkdir calls were replaced with os.makedirs(..., exist_ok=True),
+   including creation of missing parent directories.
+
+4. FITS files used only for their headers are opened with context managers and
+   their headers copied before the files are closed.
+
+5. Searches for nonexistent '*cal2.fits' products were changed to '*cal.fits'.
+   The JWST Spec2 pipeline produces *_cal.fits, so the old patterns caused the
+   cleaning and Spec3 stages to receive no files.
+
+6. make_offset_file() was fixed. ra_offsets, dec_offsets, and filelist are now
+   initialized for every target, and filenames are appended consistently with
+   supported grating offsets before the ASDF file is written.
+
+7. run_pipeline() now accepts:
+
+       run_bgsub=True
+       cube_resolutions=(0.1, 0.05)
+
+   run_bgsub=False skips do_bgsub_step(), which is necessary while the expected
+   background text files are unavailable. cube_resolutions permits running one
+   cube scale at a time.
+
+8. A short batch driver was added:
+
+       run_all_IFS_targets.py
+
+   It imports run_pipeline_v1p21_IFS, discovers subdirectories of dir_inputdata
+   containing *_uncal.fits, and runs them sequentially with background
+   subtraction disabled and cube_resolutions=(0.1,).
+
+CRDS setup
+==========
+
+The script uses:
+
+    CRDS_PATH=/Users/jrrigby1/Ref_files/crds_cache/jwst_ops
+    CRDS_CONTEXT=jwst_1464.pmap
+    CRDS_SERVER_URL=https://jwst-crds.stsci.edu
+
+Four initially missing reference files were downloaded into:
+
+    /Users/jrrigby1/Ref_files/crds_cache/jwst_ops/references/jwst/nirspec/
+
+The files are:
+
+    jwst_nirspec_apcorr_0006.asdf
+    jwst_nirspec_area_0031.fits
+    jwst_nirspec_fflat_0172.fits
+    jwst_nirspec_sflat_0211.fits
+
+Use CRDS_MODE=local when running against the populated local cache. Network
+access from the execution environment may be unavailable.
+
+Validation already performed
+============================
+
+An initial one-exposure SGAS1429 test successfully ran Detector1, Spec2, the
+custom DQ-cleaning step, and Level-3 association/offset generation.
+
+A full SGAS1429 Detector1 run successfully produced 32 rate files in:
+
+    full-test-output/SGAS1429/
+
+Spec2 subsequently produced 16 NRS1 calibrated files, cleaning completed, and
+the 0.1-arcsec Spec3 products were built. The full-output tree is large and was
+used for debugging.
+
+A clean, compact end-to-end validation used four raw SGAS1429 NRS1 exposures:
+
+    mini-input/SGAS1429/
+
+It completed with exit code 0 through Detector1, Spec2, custom cleaning, and
+Spec3 cube building. Background subtraction was disabled. Its output is:
+
+    mini-output/SGAS1429/
+
+The verified cube is:
+
+    mini-output/SGAS1429/L3/
+    Level3_SGAS1429_NOBG_NIRCAMALIGN_XY0p1_g235m-f170lp_s3d.fits
+
+The cube has shape (1425, 51, 55). The compact run produced 4 rate files,
+4 calibrated files, and 1 cube.
+
+Known behavior and limitations
+==============================
+
+The JWST clean_flicker_noise implementation emits repeated RuntimeWarnings
+about divide-by-zero, overflow, and invalid values in matrix multiplication.
+These warnings were nonfatal in successful Detector1 runs.
+
+The 0.05-arcsec Spec3 build was terminated at the native-process level with
+exit code 138 (SIGBUS), without a Python traceback. Running it in a fresh
+process did not solve the issue. The reliable batch runner therefore requests
+only cube_resolutions=(0.1,). Do not claim that 0.05-arcsec cube generation was
+validated.
+
+The script intentionally skips medium-grating NRS2 rate files in Spec2, matching
+the existing pipeline logic. The tested SGAS1429 cube used the NRS1 products.
+
+Background subtraction has deliberately not been tested and should remain
+disabled unless the expected target background text files in dir_bkgfiles are
+available.
+
+Useful commands
+===============
+
+Compile the scripts without running the pipeline:
+
+    /Users/jrrigby1/miniforge3/envs/JWSTDP-1.20.2-1-py312-macos-arm64/bin/python \
+        -m py_compile run_pipeline_v1p21_IFS.py run_all_IFS_targets.py
+
+Run all discovered Raw_data target directories sequentially:
+
+    CRDS_MODE=local \
+    /Users/jrrigby1/miniforge3/envs/JWSTDP-1.20.2-1-py312-macos-arm64/bin/python \
+        run_all_IFS_targets.py
+
+Current discovered targets are:
+
+    COSMIC.EYE
+    SGAS1050
+    SGAS1110
+    SGAS1429
+    SGAS1527
+    SGAS2111
+
+Continue cautiously: preserve existing science choices and comments, reproduce
+failures before changing pipeline behavior, keep background subtraction off,
+and validate changes on a small subset before launching another full reduction.
